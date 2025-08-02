@@ -31,7 +31,6 @@ def fetch_ohlc(symbol: str):
             "date": date.strftime("%Y-%m-%d")
         }
     except Exception as e:
-        print(f"Error fetching data for {symbol}: {e}")
         return None
 
 

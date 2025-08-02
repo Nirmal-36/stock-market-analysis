@@ -1,5 +1,6 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from fetcher import fetch_ohlc, fetch_news
 from models import StockResponse, OHLCData, NewsArticle
 from db import stocks_collection, news_collection
@@ -7,10 +8,11 @@ from db_utils import update_stock_in_database
 from stock_utils import normalize_symbol, find_stock_matches, clean_duplicate_symbols_in_db
 from datetime import datetime
 from indian_stocks import get_stocks
-from typing import List
+from typing import List, Optional
 import logging
 import pandas as pd
 import yfinance as yf
+import io
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -248,13 +250,15 @@ def cleanup_database():
         )
 
 @app.get("/api/stock/{symbol}/history")
-def get_stock_history(symbol: str, period: str = "7d"):
+def get_stock_history(symbol: str, period: str = "1M", start_date: Optional[str] = None, end_date: Optional[str] = None):
     """
     Get historical stock data for charts
     
     Args:
         symbol: Stock symbol
-        period: Time period (1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, 10y, ytd, max)
+        period: Time period (7d, 1M, 3M, 6M, 1Y, 2Y, 5Y, max)
+        start_date: Optional start date (YYYY-MM-DD)
+        end_date: Optional end date (YYYY-MM-DD)
     """
     # Normalize symbol
     original_symbol = symbol
@@ -266,8 +270,27 @@ def get_stock_history(symbol: str, period: str = "7d"):
     try:
         ticker = yf.Ticker(symbol)
         
-        # Fetch historical data
-        hist = ticker.history(period=period)
+        # Use date range if provided, otherwise use period
+        if start_date and end_date:
+            logger.info(f"📅 Using custom date range: {start_date} to {end_date}")
+            hist = ticker.history(start=start_date, end=end_date)
+            display_period = f"{start_date} to {end_date}"
+        else:
+            # Map frontend periods to yfinance periods
+            period_mapping = {
+                '7d': '7d',
+                '1M': '1mo', 
+                '3M': '3mo',
+                '6M': '6mo',
+                '1Y': '1y',
+                '2Y': '2y',
+                '5Y': '5y',
+                'max': 'max'
+            }
+            
+            yf_period = period_mapping.get(period, period)
+            hist = ticker.history(period=yf_period)
+            display_period = period
         
         if hist.empty:
             raise HTTPException(
@@ -294,8 +317,8 @@ def get_stock_history(symbol: str, period: str = "7d"):
         
         return {
             "symbol": original_symbol,
-            "period": period,
-            "data": history_data
+            "period": display_period,
+            "history": history_data
         }
         
     except Exception as e:
@@ -303,4 +326,99 @@ def get_stock_history(symbol: str, period: str = "7d"):
         raise HTTPException(
             status_code=500, 
             detail=f"Error fetching historical data for '{original_symbol}': {str(e)}"
+        )
+
+@app.get("/api/stock/{symbol}/export")
+def export_stock_data(symbol: str, period: str = "1M", format: str = "csv", start_date: Optional[str] = None, end_date: Optional[str] = None):
+    """
+    Export historical stock data in various formats
+    
+    Args:
+        symbol: Stock symbol
+        period: Time period (7d, 1M, 3M, 6M, 1Y, 2Y, 5Y, max)
+        format: Export format (csv, json) - currently only CSV supported
+        start_date: Optional start date (YYYY-MM-DD)
+        end_date: Optional end date (YYYY-MM-DD)
+    """
+    # Normalize symbol
+    original_symbol = symbol
+    if not symbol.endswith('.NS'):
+        symbol = symbol + '.NS'
+    
+    logger.info(f"📥 Exporting {format.upper()} data for {symbol} (period: {period})")
+    
+    try:
+        ticker = yf.Ticker(symbol)
+        
+        # Use date range if provided, otherwise use period
+        if start_date and end_date:
+            logger.info(f"📅 Exporting custom date range: {start_date} to {end_date}")
+            hist = ticker.history(start=start_date, end=end_date)
+            filename_period = f"{start_date}_to_{end_date}"
+        else:
+            # Map frontend periods to yfinance periods
+            period_mapping = {
+                '7d': '7d',
+                '1M': '1mo', 
+                '3M': '3mo',
+                '6M': '6mo',
+                '1Y': '1y',
+                '2Y': '2y',
+                '5Y': '5y',
+                'max': 'max'
+            }
+            
+            yf_period = period_mapping.get(period, period)
+            hist = ticker.history(period=yf_period)
+            filename_period = period
+        
+        if hist.empty:
+            raise HTTPException(
+                status_code=404, 
+                detail=f"No historical data available for '{original_symbol}'"
+            )
+        
+        if format.lower() == "csv":
+            # Create CSV content
+            output = io.StringIO()
+            
+            # Reset index to make date a column
+            df_export = hist.reset_index()
+            df_export['Date'] = df_export['Date'].dt.strftime('%Y-%m-%d')
+            
+            # Round numerical values to 2 decimal places
+            numeric_columns = ['Open', 'High', 'Low', 'Close']
+            for col in numeric_columns:
+                if col in df_export.columns:
+                    df_export[col] = df_export[col].round(2)
+            
+            # Ensure Volume is integer
+            if 'Volume' in df_export.columns:
+                df_export['Volume'] = df_export['Volume'].astype(int)
+            
+            # Write to CSV
+            df_export.to_csv(output, index=False)
+            output.seek(0)
+            
+            # Create filename
+            current_date = datetime.now().strftime("%Y%m%d")
+            filename = f"{original_symbol}_{filename_period}_{current_date}.csv"
+            
+            # Return as streaming response
+            return StreamingResponse(
+                io.BytesIO(output.getvalue().encode()),
+                media_type="text/csv",
+                headers={"Content-Disposition": f"attachment; filename={filename}"}
+            )
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="Only CSV format is currently supported"
+            )
+        
+    except Exception as e:
+        logger.error(f"❌ Error exporting data for {symbol}: {e}")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Error exporting data for '{original_symbol}': {str(e)}"
         )

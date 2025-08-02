@@ -20,6 +20,17 @@
   border: 1px solid #5A8AA8;
 }
 
+.chart-title {
+  color: #2C5F7A;
+  font-size: 1.25rem;
+  font-weight: 700;
+  margin: 0 0 1rem 0;
+  letter-spacing: -0.025em;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .chart-wrapper {
   position: relative;
   height: 400px;

@@ -1,32 +1,60 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import StockSearch from './components/StockSearch';
 import StockCard from './components/StockCard';
 import StockChart from './components/StockChart';
+import StockDataControls from './components/StockDataControls';
+import { getStockHistory } from './utils/api';
 import './App.css';
 
 function App() {
   const [stockData, setStockData] = useState(null);
+  const [historicalData, setHistoricalData] = useState(null);
+  const [selectedPeriod, setSelectedPeriod] = useState('3M'); // Default to 3 months
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const handleStockFound = (data) => {
+  const handleStockFound = useCallback((data) => {
     setStockData(data);
+    setHistoricalData(null); // Reset historical data when new stock is selected
     setError('');
-  };
+  }, []);
 
-  const handleLoading = (isLoading) => {
+  const handleHistoryData = useCallback((data) => {
+    setHistoricalData(data);
+  }, []);
+
+  const handleLoading = useCallback((isLoading) => {
     setLoading(isLoading);
-  };
+  }, []);
 
-  const handleError = (errorMessage) => {
+  const handleError = useCallback((errorMessage) => {
     setError(errorMessage);
     setStockData(null);
-  };
+  }, []);
 
-  const clearData = () => {
+  const clearData = useCallback(() => {
     setStockData(null);
+    setHistoricalData(null);
     setError('');
-  };
+  }, []);
+
+  // Auto-fetch 3 months of historical data when a new stock is selected
+  useEffect(() => {
+    if (stockData && stockData.symbol && !historicalData) {
+      setLoading(true);
+      
+      getStockHistory(stockData.symbol, selectedPeriod)
+        .then(data => {
+          setHistoricalData(data);
+        })
+        .catch(error => {
+          setError(`Failed to load historical data: ${error.message}`);
+        })
+        .finally(() => {
+          setLoading(false);
+        });
+    }
+  }, [stockData, historicalData, selectedPeriod]);
 
   return (
     <div className="App">
@@ -86,8 +114,21 @@ function App() {
               {/* Stock Card */}
               <StockCard stockData={stockData} />
 
+              {/* Stock Data Controls - Time Period Selection & CSV Download */}
+              <StockDataControls 
+                stockSymbol={stockData.symbol}
+                selectedPeriod={selectedPeriod}
+                onPeriodChange={setSelectedPeriod}
+                onHistoryData={handleHistoryData}
+                onLoading={handleLoading}
+                onError={handleError}
+              />
+
               {/* Stock Chart */}
-              <StockChart stockData={stockData} />
+              <StockChart 
+                stockData={stockData} 
+                historicalData={historicalData}
+              />
             </div>
           )}
 

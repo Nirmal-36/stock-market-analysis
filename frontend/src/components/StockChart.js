@@ -12,7 +12,6 @@ import {
     Filler
 } from 'chart.js';
 import { Line, Bar } from 'react-chartjs-2';
-import { getStockHistory } from '../utils/api';
 import './StockChart.css';
 
 // Register Chart.js components
@@ -28,15 +27,24 @@ ChartJS.register(
     Filler
 );
 
-const StockChart = ({ stockData, chartType = 'line' }) => {
+const StockChart = ({ stockData, historicalData: propHistoricalData, chartType = 'line' }) => {
     const [historicalData, setHistoricalData] = useState(null);
-    const [loading, setLoading] = useState(false);
-    const [period, setPeriod] = useState('7d');
 
     // Extract data safely
     const symbol = stockData?.symbol || '';
     const ohlcData = stockData?.data?.ohlc_data || null;
     const hasValidData = stockData && stockData.data && stockData.data.ohlc_data;
+
+    // Use historical data from props if available
+    useEffect(() => {
+        if (propHistoricalData && propHistoricalData.history) {
+            console.log('📊 StockChart: Updating historical data, length:', propHistoricalData.history.length);
+            setHistoricalData(propHistoricalData.history);
+        } else if (propHistoricalData === null) {
+            console.log('📊 StockChart: Clearing historical data');
+            setHistoricalData(null);
+        }
+    }, [propHistoricalData]);
 
     // Generate sample historical data as fallback
     const generateSampleData = useCallback(() => {
@@ -49,15 +57,16 @@ const StockChart = ({ stockData, chartType = 'line' }) => {
         for (let i = days - 1; i >= 0; i--) {
             const date = new Date();
             date.setDate(date.getDate() - i);
-
-            // Generate realistic price variations (±2% from current)
-            const variation = (Math.random() - 0.5) * 0.04; // ±2%
+            
+            // Generate realistic price variation
+            const variation = (Math.random() - 0.5) * 0.04; // ±2% variation
             const price = currentPrice * (1 + variation);
+            const volume = Math.floor(Math.random() * 1000000) + 100000;
 
             data.push({
                 date: date.toLocaleDateString('en-IN', { month: 'short', day: 'numeric' }),
                 price: price,
-                volume: Math.floor(Math.random() * 1000000) + 500000
+                volume: volume
             });
         }
 
@@ -70,27 +79,6 @@ const StockChart = ({ stockData, chartType = 'line' }) => {
 
         return data;
     }, [ohlcData]);
-
-    // Fetch historical data when component mounts or symbol/period changes
-    useEffect(() => {
-        if (!hasValidData || !symbol) return;
-
-        const fetchHistoricalData = async () => {
-            setLoading(true);
-            try {
-                const histData = await getStockHistory(symbol, period);
-                setHistoricalData(histData.data);
-            } catch (error) {
-                console.error('Error fetching historical data:', error);
-                // Fall back to sample data if API fails
-                setHistoricalData(generateSampleData());
-            } finally {
-                setLoading(false);
-            }
-        };
-
-        fetchHistoricalData();
-    }, [symbol, period, hasValidData, generateSampleData]);
 
     // Early return after hooks
     if (!hasValidData) {
@@ -108,7 +96,7 @@ const StockChart = ({ stockData, chartType = 'line' }) => {
 
     // Format data for charts
     const formatChartData = (data) => {
-        if (Array.isArray(data)) {
+        if (Array.isArray(data) && data.length > 0 && data[0].date) {
             // Real historical data format
             return data.map(item => ({
                 date: new Date(item.date).toLocaleDateString('en-IN', { month: 'short', day: 'numeric' }),
@@ -149,19 +137,13 @@ const StockChart = ({ stockData, chartType = 'line' }) => {
         labels: formattedData.map(item => item.date),
         datasets: [
             {
-                label: 'Volume',
+                label: `${symbol} Volume`,
                 data: formattedData.map(item => item.volume),
-                backgroundColor: formattedData.map((item, index) =>
-                    index === 0 || item.price >= formattedData[index - 1]?.price
-                        ? 'rgba(90, 138, 168, 0.7)' // Medium blue for positive
-                        : 'rgba(200, 181, 166, 0.7)' // Light beige for negative
-                ),
-                borderColor: formattedData.map((item, index) =>
-                    index === 0 || item.price >= formattedData[index - 1]?.price
-                        ? 'rgb(90, 138, 168)' // Medium blue
-                        : 'rgb(200, 181, 166)' // Light beige
-                ),
+                backgroundColor: 'rgba(90, 138, 168, 0.8)',
+                borderColor: 'rgb(90, 138, 168)',
                 borderWidth: 1,
+                borderRadius: 4,
+                borderSkipped: false,
             }
         ]
     };
@@ -174,22 +156,16 @@ const StockChart = ({ stockData, chartType = 'line' }) => {
             legend: {
                 position: 'top',
                 labels: {
+                    color: '#2C5F7A',
                     font: {
                         weight: 'bold'
                     }
                 }
             },
             title: {
-                display: true,
-                text: `${symbol} - Price Trend (${period.toUpperCase()})`,
-                font: {
-                    size: 16,
-                    weight: 'bold'
-                }
+                display: false
             },
             tooltip: {
-                mode: 'index',
-                intersect: false,
                 backgroundColor: 'rgba(44, 95, 122, 0.9)',
                 titleColor: '#F5F5F5',
                 bodyColor: '#F5F5F5',
@@ -249,40 +225,32 @@ const StockChart = ({ stockData, chartType = 'line' }) => {
             legend: {
                 position: 'top',
                 labels: {
+                    color: '#2C5F7A',
                     font: {
                         weight: 'bold'
                     }
                 }
             },
             title: {
-                display: true,
-                text: `${symbol} - Volume (${period.toUpperCase()})`,
-                font: {
-                    size: 16,
-                    weight: 'bold'
-                }
+                display: false
             },
             tooltip: {
                 backgroundColor: 'rgba(44, 95, 122, 0.9)',
                 titleColor: '#F5F5F5',
                 bodyColor: '#F5F5F5',
+                borderColor: 'rgb(90, 138, 168)',
+                borderWidth: 1,
                 callbacks: {
                     label: function (context) {
-                        const volume = context.parsed.y;
-                        let formattedVolume;
-                        if (volume >= 10000000) {
-                            formattedVolume = `${(volume / 10000000).toFixed(2)}Cr`;
-                        } else if (volume >= 100000) {
-                            formattedVolume = `${(volume / 100000).toFixed(2)}L`;
-                        } else if (volume >= 1000) {
-                            formattedVolume = `${(volume / 1000).toFixed(2)}K`;
-                        } else {
-                            formattedVolume = volume.toLocaleString('en-IN');
-                        }
-                        return `Volume: ${formattedVolume}`;
+                        return `Volume: ${context.parsed.y.toLocaleString('en-IN')}`;
                     }
                 }
             }
+        },
+        interaction: {
+            mode: 'nearest',
+            axis: 'x',
+            intersect: false
         },
         scales: {
             x: {
@@ -328,41 +296,21 @@ const StockChart = ({ stockData, chartType = 'line' }) => {
 
     return (
         <div className="stock-chart">
-            {/* Period Selection Controls */}
-            <div className="chart-controls">
-                <span className="controls-label">Time Period:</span>
-                {['1d', '7d', '1mo', '3mo', '6mo', '1y'].map(p => (
-                    <button
-                        key={p}
-                        className={`chart-control-button ${period === p ? 'active' : ''}`}
-                        onClick={() => setPeriod(p)}
-                        disabled={loading}
-                    >
-                        {p.toUpperCase()}
-                    </button>
-                ))}
+            <div className="chart-container">
+                <div className="chart-section">
+                    <h3 className="chart-title">📈 Price Chart</h3>
+                    <div className="chart-wrapper">
+                        <Line data={priceChartData} options={priceChartOptions} />
+                    </div>
+                </div>
+
+                <div className="chart-section">
+                    <h3 className="chart-title">📊 Volume Chart</h3>
+                    <div className="chart-wrapper">
+                        <Bar data={volumeChartData} options={volumeChartOptions} />
+                    </div>
+                </div>
             </div>
-
-            {loading ? (
-                <div className="chart-loading">
-                    <div className="chart-loading-spinner"></div>
-                    <p className="chart-loading-text">Loading historical data...</p>
-                </div>
-            ) : (
-                <div className="chart-container">
-                    <div className="chart-section">
-                        <div className="chart-wrapper">
-                            <Line data={priceChartData} options={priceChartOptions} />
-                        </div>
-                    </div>
-
-                    <div className="chart-section">
-                        <div className="chart-wrapper">
-                            <Bar data={volumeChartData} options={volumeChartOptions} />
-                        </div>
-                    </div>
-                </div>
-            )}
         </div>
     );
 };

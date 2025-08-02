@@ -23,12 +23,28 @@ export const getStock = async (symbol) => {
 };
 
 // Get historical stock data for charts
-export const getStockHistory = async (symbol, period = '7d') => {
+export const getStockHistory = async (symbol, period = '1M', startDate = null, endDate = null) => {
   try {
-    const response = await api.get(`/api/stock/${symbol}/history?period=${period}`);
+    let url = `/api/stock/${symbol}/history?period=${period}`;
+    if (startDate && endDate) {
+      url += `&start_date=${startDate}&end_date=${endDate}`;
+    }
+    const response = await api.get(url);
     return response.data;
   } catch (error) {
     throw new Error(error.response?.data?.detail || 'Failed to fetch historical data');
+  }
+};
+
+// Download stock data as CSV
+export const downloadStockCSV = async (symbol, period = '1M') => {
+  try {
+    const response = await api.get(`/api/stock/${symbol}/export?period=${period}&format=csv`, {
+      responseType: 'blob'
+    });
+    return response;
+  } catch (error) {
+    throw new Error(error.response?.data?.detail || 'Failed to download CSV data');
   }
 };
 
